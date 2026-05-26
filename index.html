@@ -126,6 +126,47 @@
     .btn-refresh:hover { background: #f0f0ec; }
     .btn-refresh:disabled { opacity: .5; cursor: not-allowed; }
 
+    /* Download dropdown */
+    .dl-wrap { position: relative; }
+    .btn-dl {
+      padding: 9px 16px;
+      border: 1px solid #d0d0c8;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      color: #444;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-dl:hover { background: #f0f0ec; }
+    .dl-menu {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      background: #fff;
+      border: 1px solid #e0e0d8;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.08);
+      min-width: 160px;
+      z-index: 10;
+      overflow: hidden;
+    }
+    .dl-menu.open { display: block; }
+    .dl-menu button {
+      display: block;
+      width: 100%;
+      padding: 10px 16px;
+      text-align: left;
+      background: none;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      color: #1a1a1a;
+    }
+    .dl-menu button:hover { background: #f5f5f2; }
+
     /* Tabs */
     .tab-bar {
       display: flex;
@@ -244,6 +285,13 @@
   <div class="controls">
     <input type="text" id="search" placeholder="Search plants…" oninput="render()">
     <button class="btn-refresh" id="refresh-btn" onclick="loadData(true)">↻ Refresh</button>
+    <div class="dl-wrap" id="dl-wrap">
+      <button class="btn-dl" onclick="toggleDlMenu()">⬇ Download ▾</button>
+      <div class="dl-menu" id="dl-menu">
+        <button onclick="downloadCSV()">📄 CSV (both sections)</button>
+        <button onclick="downloadExcel()">📊 Excel (.xlsx)</button>
+      </div>
+    </div>
   </div>
 
   <div class="tab-bar">
@@ -258,6 +306,7 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
   const TOKEN_KEY = "plt_token";
   let activeTab = 0;
@@ -401,6 +450,64 @@
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.floor(mins / 60);
     return `${hrs}h ago`;
+  }
+
+  // ── Download ──────────────────────────────────────────────────────────────
+  function toggleDlMenu() {
+    document.getElementById("dl-menu").classList.toggle("open");
+  }
+
+  // Close menu if clicking outside
+  document.addEventListener("click", e => {
+    if (!document.getElementById("dl-wrap").contains(e.target)) {
+      document.getElementById("dl-menu").classList.remove("open");
+    }
+  });
+
+  function getDateStamp() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function downloadCSV() {
+    document.getElementById("dl-menu").classList.remove("open");
+    if (!allData.mcgOnly.length && !allData.sbOos.length) {
+      alert("No data loaded yet — please wait for the data to finish loading.");
+      return;
+    }
+    const rows = [
+      ["Plant Name", "Status"],
+      ...allData.mcgOnly.map(n => [n, "MCG in stock — not carried by SB"]),
+      ...allData.sbOos.map(n  => [n, "MCG in stock — SB out of stock"]),
+    ];
+    const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement("a"), { href: url, download: `MCG-tracker-${getDateStamp()}.csv` });
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadExcel() {
+    document.getElementById("dl-menu").classList.remove("open");
+    if (!allData.mcgOnly.length && !allData.sbOos.length) {
+      alert("No data loaded yet — please wait for the data to finish loading.");
+      return;
+    }
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1 — MCG only
+    const ws1Data = [["Plant Name"], ...allData.mcgOnly.map(n => [n])];
+    const ws1 = XLSX.utils.aoa_to_sheet(ws1Data);
+    ws1["!cols"] = [{ wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, ws1, "MCG Only (Not in SB)");
+
+    // Sheet 2 — SB out of stock
+    const ws2Data = [["Plant Name"], ...allData.sbOos.map(n => [n])];
+    const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
+    ws2["!cols"] = [{ wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, ws2, "SB Out of Stock");
+
+    XLSX.writeFile(wb, `MCG-tracker-${getDateStamp()}.xlsx`);
   }
 
   // ── Init: restore session if token still valid ────────────────────────────
