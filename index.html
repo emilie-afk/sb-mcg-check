@@ -214,6 +214,7 @@
     .badge-green { background: #EAF3DE; color: #3B6D11; }
     .badge-amber { background: #FAEEDA; color: #7A4B00; }
     .plant-name  { flex: 1; }
+    .sku-tag     { font-size: 11px; color: #888; background: #f0f0ec; border-radius: 4px; padding: 2px 7px; flex-shrink: 0; font-family: monospace; }
     .genus-tag   { font-size: 12px; color: #aaa; flex-shrink: 0; }
 
     /* States */
@@ -406,14 +407,16 @@
     render();
   }
 
+  function itemName(item) { return item.name || item; }
+
   function render() {
     const q    = document.getElementById("search").value.toLowerCase();
     const list = activeTab === 0 ? allData.mcgOnly : allData.sbOos;
-    const rows = list.filter(n => n.toLowerCase().includes(q));
+    const rows = list.filter(item => itemName(item).toLowerCase().includes(q));
 
     // Update tab counts with filter
-    const f0 = allData.mcgOnly.filter(n => n.toLowerCase().includes(q)).length;
-    const f1 = allData.sbOos.filter(n  => n.toLowerCase().includes(q)).length;
+    const f0 = allData.mcgOnly.filter(item => itemName(item).toLowerCase().includes(q)).length;
+    const f1 = allData.sbOos.filter(item  => itemName(item).toLowerCase().includes(q)).length;
     document.getElementById("t1c").textContent = `(${f0})`;
     document.getElementById("t2c").textContent = `(${f1})`;
 
@@ -428,9 +431,16 @@
 
     setListHTML(
       `<div class="plant-list">` +
-      rows.map(name => {
+      rows.map(item => {
+        const name  = item.name || item;
+        const sku   = item.sku  || "";
+        const url   = item.url  || "";
         const genus = name.split(/[\s'"]/)[0];
-        return `<div class="plant-row">${badge}<span class="plant-name">${escHtml(name)}</span><span class="genus-tag">${escHtml(genus)}</span></div>`;
+        const nameEl = url
+          ? `<a class="plant-name" href="${escHtml(url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${escHtml(name)}</a>`
+          : `<span class="plant-name">${escHtml(name)}</span>`;
+        const skuEl = sku ? `<span class="sku-tag">${escHtml(sku)}</span>` : "";
+        return `<div class="plant-row">${badge}${nameEl}${skuEl}<span class="genus-tag">${escHtml(genus)}</span></div>`;
       }).join("") +
       `</div>`
     );
@@ -474,12 +484,18 @@
       alert("No data loaded yet — please wait for the data to finish loading.");
       return;
     }
+    const toRow = (item, status) => {
+      const name = item.name || item;
+      const sku  = item.sku  || "";
+      const url  = item.url  || "";
+      return [name, sku, url, status];
+    };
     const rows = [
-      ["Plant Name", "Status"],
-      ...allData.mcgOnly.map(n => [n, "MCG in stock — not carried by SB"]),
-      ...allData.sbOos.map(n  => [n, "MCG in stock — SB out of stock"]),
+      ["Plant Name", "MCG SKU", "MCG URL", "Status"],
+      ...allData.mcgOnly.map(item => toRow(item, "MCG in stock — not carried by SB")),
+      ...allData.sbOos.map(item  => toRow(item, "MCG in stock — SB out of stock")),
     ];
-    const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url  = URL.createObjectURL(blob);
     const a    = Object.assign(document.createElement("a"), { href: url, download: `MCG-tracker-${getDateStamp()}.csv` });
@@ -494,17 +510,22 @@
       return;
     }
     const wb = XLSX.utils.book_new();
+    const toRow = item => [item.name || item, item.sku || "", item.url || ""];
 
     // Sheet 1 — MCG only
-    const ws1Data = [["Plant Name"], ...allData.mcgOnly.map(n => [n])];
-    const ws1 = XLSX.utils.aoa_to_sheet(ws1Data);
-    ws1["!cols"] = [{ wch: 60 }];
+    const ws1 = XLSX.utils.aoa_to_sheet([
+      ["Plant Name", "MCG SKU", "MCG URL"],
+      ...allData.mcgOnly.map(toRow),
+    ]);
+    ws1["!cols"] = [{ wch: 60 }, { wch: 16 }, { wch: 60 }];
     XLSX.utils.book_append_sheet(wb, ws1, "MCG Only (Not in SB)");
 
     // Sheet 2 — SB out of stock
-    const ws2Data = [["Plant Name"], ...allData.sbOos.map(n => [n])];
-    const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
-    ws2["!cols"] = [{ wch: 60 }];
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ["Plant Name", "MCG SKU", "MCG URL"],
+      ...allData.sbOos.map(toRow),
+    ]);
+    ws2["!cols"] = [{ wch: 60 }, { wch: 16 }, { wch: 60 }];
     XLSX.utils.book_append_sheet(wb, ws2, "SB Out of Stock");
 
     XLSX.writeFile(wb, `MCG-tracker-${getDateStamp()}.xlsx`);
