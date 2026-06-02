@@ -203,31 +203,53 @@ async function scrapeMCG() {
     )
   );
 
-  const products = new Set();
+  // Use a Map keyed by name to store {name, url}
+  const products = new Map();
   for (const html of results) {
     if (!html) continue;
     const $ = cheerio.load(html);
-    $(".card h3").each((_, el) => {
-      const name = $(el).text().trim();
-      if (name) products.add(name);
+    $(".card").each((_, card) => {
+      const $card = $(card);
+      const name = $card.find("h3").text().trim();
+      const url  = $card.find("a").first().attr("href") || "";
+      if (name && !products.has(name)) products.set(name, { name, url });
     });
   }
-  return [...products];
+  return [...products.values()];
 }
 
 // ── De-duplicate MCG by base scientific name ──────────────────────────────────
 function deduplicateMCG(products) {
   const seen = new Set();
   const out  = [];
-  for (const name of products) {
+  for (const item of products) {
+    const name = item.name || item;
     const base = name.replace(/\[.*?\]/g, "").trim();
     const sci  = base.split(" - ")[0].trim().toLowerCase().replace(/[''\"'™®©]/g, "").trim();
     if (!seen.has(sci)) {
       seen.add(sci);
-      out.push(name);
+      out.push(item);
     }
   }
   return out;
+}
+
+// ── Fetch SKU from individual MCG product page ────────────────────────────────
+async function fetchSKU(url) {
+  if (!url) return "";
+  try {
+    const res  = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) return "";
+    const html = await res.text();
+    // Extract productGroupID from JSON-LD (fastest, most reliable)
+    const match = html.match(/"productGroupID"\s*:\s*"([^"]+)"/);
+    if (match) return match[1];
+    // Fallback: data-product-sku attribute
+    const skuMatch = html.match(/data-product-sku="([^"]+)"/);
+    return skuMatch ? skuMatch[1] : "";
+  } catch {
+    return "";
+  }
 }
 
 // ── Compare ───────────────────────────────────────────────────────────────────
@@ -250,7 +272,9 @@ function compare(sbIn, sbOut, mcgRaw) {
   const skip = new Set(["mystery", "individual succulent plug"]);
 
   const mcgOnly = [], sbOos = [];
-  for (const name of mcgDeduped) {
+  for (const item of mcgDeduped) {
+    const name  = item.name || item;
+    const url   = item.url  || "";
     const lower = name.toLowerCase();
     if ([...skip].some(s => lower.startsWith(s))) continue;
     if (isHouseplant(name)) continue;
@@ -258,13 +282,24 @@ function compare(sbIn, sbOut, mcgRaw) {
     if (isExcluded(mcgKw)) continue;
     const status = findSBStatus(name);
     if (status === "IN") continue;
-    if (status === "OUT") sbOos.push(name);
-    else mcgOnly.push(name);
+    if (status === "OUT") sbOos.push({ name, url, sku: "" });
+    else mcgOnly.push({ name, url, sku: "" });
   }
 
-  mcgOnly.sort();
-  sbOos.sort();
+  mcgOnly.sort((a, b) => a.name.localeCompare(b.name));
+  sbOos.sort((a,  b) => a.name.localeCompare(b.name));
   return { mcgOnly, sbOos };
+}
+
+// ── Enrich results with SKUs (parallel fetch of product pages) ────────────────
+async function enrichWithSKUs(items) {
+  const enriched = await Promise.all(
+    items.map(async item => {
+      const sku = await fetchSKU(item.url);
+      return { ...item, sku };
+    })
+  );
+  return enriched;
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -316,7 +351,14 @@ exports.handler = async (event) => {
     };
   }
 
-  const { mcgOnly, sbOos } = compare(sbIn, sbOut, mcgRaw);
+  let { mcgOnly, sbOos } = compare(sbIn, sbOut, mcgRaw);
+
+  // Fetch SKUs for all result plants in parallel
+  [mcgOnly, sbOos] = await Promise.all([
+    enrichWithSKUs(mcgOnly),
+    enrichWithSKUs(sbOos),
+  ]);
+
   const result = { mcgOnly, sbOos, cachedAt: Date.now(), fromCache: false };
 
   // Save to cache
