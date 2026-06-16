@@ -51,6 +51,17 @@ function matchScore(kwA, kwB) {
   return n;
 }
 
+// Two keyword sets "overlap" if they share ≥2 words, OR if either side
+// has only 1 keyword and that keyword appears in the other set.
+// This catches common-name plants like "Ghost Plant" (→ {"ghost"}) that
+// have only one meaningful token after stopword filtering.
+function overlaps(kwA, kwB) {
+  const score = matchScore(kwA, kwB);
+  if (score >= 2) return true;
+  if (score === 1 && (kwA.size === 1 || kwB.size === 1)) return true;
+  return false;
+}
+
 // ── Exclusion list (Over $19 from MCG_exclusion_products.xlsx) ───────────────
 const EXCLUSION_RAW = [
   "Cereus forbesii 'Spiralis' - Spiral Cactus [extra large]",
@@ -156,7 +167,7 @@ function isHouseplant(name) {
 
 function isExcluded(mcgKw) {
   for (const ekw of EXCLUSION_KW) {
-    if (matchScore(mcgKw, ekw) >= 2) return true;
+    if (overlaps(mcgKw, ekw)) return true;
   }
   return false;
 }
@@ -164,16 +175,21 @@ function isExcluded(mcgKw) {
 // ── Scrape Succulents Box (Shopify JSON API) ──────────────────────────────────
 async function scrapeSB() {
   const inStock = [], outOfStock = [];
+  const seenTitles = new Set();
+  // Use /products.json (all collections) so we don't miss plants in cacti,
+  // agave, or other sub-collections that aren't under /collections/succulents.
   let page = 1;
   while (true) {
     const res = await fetch(
-      `https://succulentsbox.com/collections/succulents/products.json?limit=250&page=${page}`,
+      `https://succulentsbox.com/products.json?limit=250&page=${page}`,
       { headers: { "User-Agent": "Mozilla/5.0" } }
     );
     if (!res.ok) break;
     const data = await res.json();
     if (!data.products || data.products.length === 0) break;
     for (const p of data.products) {
+      if (seenTitles.has(p.title)) continue;
+      seenTitles.add(p.title);
       const available = p.variants.some(v => v.available);
       if (available) inStock.push(p.title);
       else outOfStock.push(p.title);
@@ -260,11 +276,8 @@ function compare(sbIn, sbOut, mcgRaw) {
   function findSBStatus(mcgName) {
     const mcgKw = keyWords(mcgName);
     if (mcgKw.size === 0) return null;
-    let bestIn = 0, bestOut = 0;
-    for (const [, kw] of sbInWords)  bestIn  = Math.max(bestIn,  matchScore(mcgKw, kw));
-    for (const [, kw] of sbOutWords) bestOut = Math.max(bestOut, matchScore(mcgKw, kw));
-    if (bestIn  >= 2) return "IN";
-    if (bestOut >= 2) return "OUT";
+    for (const [, kw] of sbInWords)  if (overlaps(mcgKw, kw))  return "IN";
+    for (const [, kw] of sbOutWords) if (overlaps(mcgKw, kw))  return "OUT";
     return null;
   }
 
