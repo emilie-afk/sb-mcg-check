@@ -1,0 +1,6 @@
+node_modules/
+.netlify/
+# Private tracker configuration never belongs in Git
+*.private.json
+tracker-config.json
+package-lock.json

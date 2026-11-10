@@ -2,13 +2,7 @@
 // SITE_PASSWORD and TOKEN_SECRET live in Netlify environment variables.
 // Neither value is ever sent to the browser.
 
-const crypto = require("crypto");
-
-function makeToken(secret) {
-  const ts = Date.now().toString();
-  const sig = crypto.createHmac("sha256", secret).update(ts).digest("hex");
-  return `${ts}.${sig}`;
-}
+const { makeToken, safeEqual } = require("../lib/token");
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -22,7 +16,7 @@ exports.handler = async (event) => {
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Server not configured. Set SITE_PASSWORD and TOKEN_SECRET in Netlify environment variables." }),
+      body: JSON.stringify({ error: "Server not configured." }),
     };
   }
 
@@ -30,13 +24,11 @@ exports.handler = async (event) => {
   try {
     body = JSON.parse(event.body || "{}");
   } catch {
-    return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON" }) };
+    return { statusCode: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Invalid JSON" }) };
   }
 
-  if (body.password !== sitePassword) {
-    // Constant-time comparison to prevent timing attacks
-    const dummy = crypto.createHmac("sha256", tokenSecret).update("dummy").digest("hex");
-    void dummy;
+  // Constant-time comparison
+  if (!safeEqual(typeof body.password === "string" ? body.password : "", sitePassword)) {
     return {
       statusCode: 401,
       headers: { "Content-Type": "application/json" },
@@ -47,7 +39,7 @@ exports.handler = async (event) => {
   const token = makeToken(tokenSecret);
   return {
     statusCode: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     body: JSON.stringify({ ok: true, token }),
   };
 };
