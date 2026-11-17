@@ -1,5 +1,7 @@
 # Plant tracker (sb-mcg-check)
 
+**Designed and built by Emilie Ngo for Succulents Box.**
+
 Compares the supplier catalogue with the Succulents Box storefront and lists
 plants the supplier carries that the store does not (or has out of stock).
 Plant Breakdown's tracker gateway reads the same endpoints server-side.
